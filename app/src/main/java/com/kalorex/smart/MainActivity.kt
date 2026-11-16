@@ -41,6 +41,8 @@ class MainActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var temperatureText: TextView
     private lateinit var angleText: TextView
+    private lateinit var clockText: TextView
+    private lateinit var nextEventText: TextView
     private lateinit var dial: ServoDial
     private lateinit var mainLayout: LinearLayout
     private lateinit var contentLayout: LinearLayout
@@ -133,6 +135,7 @@ class MainActivity : Activity() {
 
         setContentView(mainLayout)
         showHome()
+        fetchCalendar()
     }
 
     private fun makeButton(label: String, action: () -> Unit): Button {
@@ -169,6 +172,8 @@ class MainActivity : Activity() {
     private fun showHome() {
         contentLayout.removeAllViews()
         addLabel(contentLayout, "CONTROL DE TEMPERATURA", 15f)
+        clockText = addLabel(contentLayout, "Hora del controlador: consultando...", 14f)
+        nextEventText = addLabel(contentLayout, "Próximo cambio: consultando calendario...", 14f)
         addLabel(contentLayout, "Posición solicitada", 16f)
 
         angleText = addLabel(contentLayout, "$currentAngle°", 34f).apply {
@@ -264,6 +269,8 @@ class MainActivity : Activity() {
         powerButtons.addView(offButton, LinearLayout.LayoutParams(0, dp(52), 1f))
         powerButtons.addView(onButton, LinearLayout.LayoutParams(0, dp(52), 1f))
         contentLayout.addView(powerButtons)
+        checkConnection()
+        if (calendarRows.isNotEmpty()) updateNextEventLabel()
     }
 
     private fun showControl() {
@@ -502,6 +509,7 @@ class MainActivity : Activity() {
                     )
                 }
                 calendarRows = result
+                updateNextEventLabel()
                 if (::listContainer.isInitialized) {
                     updateCalendarList(listContainer)
                     loadEntryIntoEditor()
@@ -555,8 +563,81 @@ class MainActivity : Activity() {
     }
 
     private fun checkConnection() {
-        request("http://$deviceIp/status") { code, _ ->
-            setConnectionState(code in 200..299)
+        request("http://$deviceIp/status") { code, body ->
+            val connected = code in 200..299
+            setConnectionState(connected)
+            if (connected) {
+                try {
+                    val status = JSONObject(body)
+                    val synced = status.optBoolean("clock_synced", false)
+                    val time = status.optString("time", "")
+                    if (::clockText.isInitialized) {
+                        clockText.text = if (synced && time.isNotBlank()) {
+                            "Hora del controlador: $time (Hermosillo)"
+                        } else {
+                            "Hora del controlador: sin sincronizar"
+                        }
+                    }
+                } catch (_: Exception) {
+                    if (::clockText.isInitialized) {
+                        clockText.text = "Hora del controlador: no disponible"
+                    }
+                }
+            } else if (::clockText.isInitialized) {
+                clockText.text = "Controlador sin conexión"
+            }
+        }
+    }
+
+    private fun updateNextEventLabel() {
+        if (!::nextEventText.isInitialized) return
+
+        // La tarjeta entrega la hora sincronizada. Para calcular el día de la semana,
+        // el teléfono también debe tener configurada la zona horaria de Hermosillo.
+        val now = java.util.Calendar.getInstance()
+        val currentDay = (now.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7
+        val currentMinutes = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
+            now.get(java.util.Calendar.MINUTE)
+
+        var bestDelta = Int.MAX_VALUE
+        var bestEntry: CalendarEntry? = null
+        var bestDays = 0
+
+        for (entry in calendarRows) {
+            if (!entry.active) continue
+            val parts = entry.hour.trim().split(Regex("\\s+"))
+            if (parts.size != 2) continue
+            val hm = parts[0].split(":")
+            if (hm.size != 2) continue
+
+            var hour = hm[0].toIntOrNull() ?: continue
+            val minute = hm[1].toIntOrNull() ?: continue
+            if (hour !in 1..12 || minute !in 0..59) continue
+            if (parts[1] == "AM") {
+                if (hour == 12) hour = 0
+            } else if (parts[1] == "PM") {
+                if (hour != 12) hour += 12
+            } else continue
+
+            val eventMinutes = hour * 60 + minute
+            val daysAhead = (entry.day - currentDay + 7) % 7
+            var delta = daysAhead * 1440 + eventMinutes - currentMinutes
+            if (delta <= 0) delta += 7 * 1440
+
+            if (delta < bestDelta) {
+                bestDelta = delta
+                bestEntry = entry
+                bestDays = daysAhead
+            }
+        }
+
+        val entry = bestEntry
+        if (entry == null) {
+            nextEventText.text = "Próximo cambio: no hay horarios activos"
+        } else {
+            val dayLabel = if (bestDays == 0) "Hoy" else dayNames[entry.day]
+            nextEventText.text =
+                "Próximo cambio: $dayLabel · ${entry.hour} · ${entry.temperature} °C"
         }
     }
 
