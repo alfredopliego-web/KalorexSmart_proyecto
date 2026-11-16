@@ -2,18 +2,25 @@ package com.kalorex.demo
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.TimePickerDialog
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Bundle
+import android.os.CountDownTimer
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -25,79 +32,118 @@ import org.json.JSONObject
 class MainActivity : Activity() {
 
     private val executor = Executors.newSingleThreadExecutor()
-
-    private val backgroundColor = Color.rgb(7, 20, 43)
-    private val cardColor = Color.rgb(14, 34, 64)
-    private val cyan = Color.rgb(0, 220, 255)
-    private val white = Color.WHITE
-    private val green = Color.rgb(30, 220, 75)
+    private val handler = Handler(Looper.getMainLooper())
+    private val prefs by lazy { getSharedPreferences("kalorex_settings", MODE_PRIVATE) }
 
     private var deviceIp = "192.168.1.188"
     private var currentAngle = 90
-    private var selectedTemperature = 50
     private var isConnected = false
-    private var powerOn = false
-
-    private lateinit var statusText: TextView
-    private lateinit var temperatureText: TextView
-    private lateinit var angleText: TextView
-    private lateinit var clockText: TextView
-    private lateinit var nextEventText: TextView
-    private lateinit var dial: ServoDial
-    private lateinit var mainLayout: LinearLayout
-    private lateinit var contentLayout: LinearLayout
+    private var themeIndex = 0
+    private var timerDurationMs = 30L * 60L * 1000L
+    private var remainingMs = timerDurationMs
+    private var countdown: CountDownTimer? = null
+    private var timerRunning = false
+    private var selectedDay = 0
 
     private val dayNames = arrayOf(
-        "Lunes", "Martes", "Miércoles", "Jueves",
-        "Viernes", "Sábado", "Domingo"
+        "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"
     )
 
-    private var selectedDay = 0
-    private var selectedSlot = 0
-    private var calendarRows: List<CalendarEntry> = emptyList()
-
-    data class CalendarEntry(
-        val day: Int,
-        val slot: Int,
-        val active: Boolean,
-        val hour: String,
-        val temperature: Int
+    private data class DayPlan(
+        var enabled: Boolean = false,
+        var start: String = "06:00 AM",
+        var end: String = "10:00 PM"
     )
+
+    private val plans = MutableList(7) { DayPlan() }
+
+    private var background = Color.rgb(7, 20, 43)
+    private var panel = Color.rgb(14, 34, 64)
+    private var accent = Color.rgb(0, 220, 255)
+    private var foreground = Color.WHITE
+    private var success = Color.rgb(30, 220, 75)
+
+    private lateinit var mainLayout: LinearLayout
+    private lateinit var contentLayout: LinearLayout
+    private lateinit var statusText: TextView
+    private lateinit var clockText: TextView
+    private lateinit var angleText: TextView
+    private lateinit var timerText: TextView
+    private lateinit var dial: ServoDial
+
+    private val clockRunnable = object : Runnable {
+        override fun run() {
+            if (::clockText.isInitialized) {
+                clockText.text = SimpleDateFormat("hh:mm:ss a", Locale("es", "MX"))
+                    .format(Date()).uppercase(Locale("es", "MX"))
+            }
+            handler.postDelayed(this, 1000L)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        createInterface()
+        deviceIp = prefs.getString("device_ip", deviceIp) ?: deviceIp
+        themeIndex = prefs.getInt("theme", 0)
+        loadPlans()
+        applyTheme()
+        createShell()
+        showHome()
+        handler.post(clockRunnable)
         checkConnection()
     }
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
-    private fun createInterface() {
+    private fun applyTheme() {
+        when (themeIndex) {
+            0 -> {
+                background = Color.rgb(7, 20, 43)
+                panel = Color.rgb(14, 34, 64)
+                accent = Color.rgb(0, 220, 255)
+                foreground = Color.WHITE
+                success = Color.rgb(30, 220, 75)
+            }
+            1 -> {
+                background = Color.rgb(12, 12, 14)
+                panel = Color.rgb(31, 31, 34)
+                accent = Color.rgb(235, 235, 235)
+                foreground = Color.WHITE
+                success = Color.rgb(80, 210, 130)
+            }
+            else -> {
+                background = Color.rgb(248, 247, 245)
+                panel = Color.WHITE
+                accent = Color.rgb(190, 20, 48)
+                foreground = Color.rgb(45, 48, 52)
+                success = Color.rgb(30, 155, 75)
+            }
+        }
+    }
+
+    private fun createShell() {
         mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(backgroundColor)
-            setPadding(dp(14), dp(12), dp(14), dp(8))
+            setBackgroundColor(background)
+            setPadding(dp(14), dp(8), dp(14), dp(6))
         }
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-
         val title = TextView(this).apply {
             text = "🔥 KalorexSmart"
-            textSize = 24f
-            setTextColor(white)
+            textSize = 23f
+            setTextColor(foreground)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
-        header.addView(title, LinearLayout.LayoutParams(0, dp(55), 1f))
-
+        header.addView(title, LinearLayout.LayoutParams(0, dp(48), 1f))
         statusText = TextView(this).apply {
-            text = "● Desconectado"
-            textSize = 13f
-            setTextColor(Color.LTGRAY)
-            gravity = Gravity.CENTER
+            text = "● Revisando"
+            textSize = 12f
+            setTextColor(foreground)
         }
         header.addView(statusText)
         header.addView(makeButton("IP") { showIpDialog() })
@@ -107,80 +153,70 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
         }
-        mainLayout.addView(
-            contentLayout,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-            )
-        )
+        mainLayout.addView(contentLayout, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
 
-        val navigation = LinearLayout(this).apply {
+        val nav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setBackgroundColor(cardColor)
+            setBackgroundColor(panel)
         }
-        navigation.addView(
-            makeButton("⌂\nHome") { showHome() },
-            LinearLayout.LayoutParams(0, dp(60), 1f)
-        )
-        navigation.addView(
-            makeButton("▦\nCalendario") { showCalendar() },
-            LinearLayout.LayoutParams(0, dp(60), 1f)
-        )
-        navigation.addView(
-            makeButton("⚙\nAjustes") { showSettings() },
-            LinearLayout.LayoutParams(0, dp(60), 1f)
-        )
-        mainLayout.addView(navigation)
-
+        listOf(
+            "⌂\nHome" to { showHome() },
+            "▦\nCalendario" to { showCalendar() },
+            "◷\nTemporizador" to { showTimer() },
+            "⚙\nAjustes" to { showSettings() }
+        ).forEach { item ->
+            nav.addView(makeButton(item.first, item.second),
+                LinearLayout.LayoutParams(0, dp(54), 1f))
+        }
+        mainLayout.addView(nav)
         setContentView(mainLayout)
-        showHome()
-        fetchCalendar()
     }
 
-    private fun makeButton(label: String, action: () -> Unit): Button {
-        return Button(this).apply {
+    private fun makeButton(label: String, action: () -> Unit): Button =
+        Button(this).apply {
             text = label
-            textSize = 14f
-            setTextColor(white)
-            setBackgroundColor(cardColor)
+            textSize = 12f
+            setTextColor(foreground)
+            setBackgroundColor(panel)
             isAllCaps = false
+            minHeight = dp(42)
+            setPadding(dp(4), dp(2), dp(4), dp(2))
             setOnClickListener { action() }
         }
-    }
 
-    private fun addLabel(
-        parent: LinearLayout,
-        value: String,
-        size: Float = 18f
-    ): TextView {
-        val text = TextView(this).apply {
-            this.text = value
+    private fun label(parent: LinearLayout, value: String, size: Float = 17f): TextView {
+        val t = TextView(this).apply {
+            text = value
             textSize = size
-            setTextColor(white)
+            setTextColor(foreground)
             gravity = Gravity.CENTER
-            setPadding(dp(4), dp(8), dp(4), dp(8))
+            setPadding(dp(4), dp(5), dp(4), dp(5))
         }
-        parent.addView(text)
-        return text
+        parent.addView(t)
+        return t
     }
 
-    private fun addSpace(parent: LinearLayout, height: Int = 8) {
+    private fun space(parent: LinearLayout, height: Int = 6) {
         parent.addView(View(this), LinearLayout.LayoutParams(1, dp(height)))
     }
 
     private fun showHome() {
         contentLayout.removeAllViews()
-        addLabel(contentLayout, "CONTROL DE TEMPERATURA", 15f)
-        clockText = addLabel(contentLayout, "Hora del controlador: consultando...", 14f)
-        nextEventText = addLabel(contentLayout, "Próximo cambio: consultando calendario...", 14f)
-        addLabel(contentLayout, "Posición solicitada", 16f)
-
-        angleText = addLabel(contentLayout, "$currentAngle°", 34f).apply {
-            setTextColor(cyan)
+        label(contentLayout, "CONTROL MANUAL DE POSICIÓN", 14f)
+        clockText = label(contentLayout, "12:00:00 PM", 25f).apply {
+            setTextColor(accent)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
-
+        label(contentLayout, "Hora local del teléfono", 11f)
+        space(contentLayout, 3)
+        label(contentLayout, "Posición de prueba", 15f)
+        angleText = label(contentLayout, "$currentAngle°", 31f).apply {
+            setTextColor(accent)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
         dial = ServoDial(this).apply {
             angle = currentAngle
             onAngleChanged = { value ->
@@ -190,454 +226,265 @@ class MainActivity : Activity() {
             onAngleSelected = { value ->
                 currentAngle = value
                 angleText.text = "$value°"
-                sendAngle(value)
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Control manual de prueba")
+                    .setMessage("Confirma que el servo está sin carga y no está acoplado a una válvula, perilla de gas ni mecanismo del quemador.")
+                    .setNegativeButton("Cancelar", null)
+                    .setPositiveButton("Enviar posición") { _, _ -> sendAngle(value) }
+                    .show()
             }
         }
-        contentLayout.addView(
-            dial,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-            )
-        )
-
-        addLabel(contentLayout, "Paso de selección: 5°", 13f)
-        addLabel(contentLayout, "Temperatura", 20f)
-        temperatureText = addLabel(
-            contentLayout, "$selectedTemperature °C", 24f
-        ).apply { setTextColor(cyan) }
-
-        val temperatures = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        for (temp in 30..70 step 5) {
-            val button = Button(this).apply {
-                text = "$temp"
-                textSize = 10f
-                isAllCaps = false
-                setTextColor(if (temp == selectedTemperature) cyan else white)
-                setBackgroundColor(
-                    if (temp == selectedTemperature) Color.rgb(20, 65, 100)
-                    else cardColor
-                )
-                setOnClickListener {
-                    selectedTemperature = temp
-                    temperatureText.text = "$temp °C"
-                    showHome()
-                }
-            }
-            temperatures.addView(
-                button, LinearLayout.LayoutParams(0, dp(44), 1f)
-            )
-        }
-        contentLayout.addView(temperatures)
-
-        val powerButtons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        val offButton = Button(this).apply {
-            text = "⏻ Apagado"
-            isAllCaps = false
-            setTextColor(white)
-            setBackgroundColor(if (!powerOn) Color.DKGRAY else cardColor)
-            setOnClickListener {
-                powerOn = false
-                showHome()
-                Toast.makeText(
-                    this@MainActivity,
-                    "Estado seleccionado en la aplicación. No controla el quemador.",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-        val onButton = Button(this).apply {
-            text = "⏻ Encendido"
-            isAllCaps = false
-            setTextColor(white)
-            setBackgroundColor(if (powerOn) green else cardColor)
-            setOnClickListener {
-                powerOn = true
-                showHome()
-                Toast.makeText(
-                    this@MainActivity,
-                    "Estado seleccionado en la aplicación. No controla el quemador.",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-        powerButtons.addView(offButton, LinearLayout.LayoutParams(0, dp(52), 1f))
-        powerButtons.addView(onButton, LinearLayout.LayoutParams(0, dp(52), 1f))
-        contentLayout.addView(powerButtons)
-        checkConnection()
-        if (calendarRows.isNotEmpty()) updateNextEventLabel()
-    }
-
-    private fun showControl() {
-        contentLayout.removeAllViews()
-        addLabel(contentLayout, "CONTROL MANUAL", 22f)
-        addLabel(contentLayout, "Posición solicitada: $currentAngle°", 20f)
-        contentLayout.addView(makeButton("− 5°") { changeAngle(-5) })
-        contentLayout.addView(makeButton("+ 5°") { changeAngle(5) })
-        addLabel(contentLayout, "Temperatura seleccionada: $selectedTemperature °C")
-        contentLayout.addView(makeButton("ENVIAR POSICIÓN") { sendAngle(currentAngle) })
-    }
-
-    private fun changeAngle(amount: Int) {
-        currentAngle = (currentAngle + amount).coerceIn(0, 180)
-        sendAngle(currentAngle)
-        showControl()
+        contentLayout.addView(dial, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
+        label(contentLayout, "Desliza el indicador para seleccionar una posición", 11f)
+        contentLayout.addView(makeButton("REGRESAR INDICADOR A 0°") {
+            currentAngle = 0
+            angleText.text = "0°"
+            dial.angle = 0
+            dial.invalidate()
+            Toast.makeText(this, "Indicador en cero. No se envió movimiento al servo.", Toast.LENGTH_LONG).show()
+        }, LinearLayout.LayoutParams(LinearLayout.MATCH_PARENT, dp(46)))
     }
 
     private fun showCalendar() {
         contentLayout.removeAllViews()
-        addLabel(contentLayout, "CALENDARIO SEMANAL", 21f)
-        addLabel(contentLayout, "Programa hasta 8 horarios independientes por día", 12f)
+        label(contentLayout, "CALENDARIO SEMANAL", 21f)
+        label(contentLayout, "Configura una ventana horaria por día", 12f)
 
         val scroll = ScrollView(this)
-        val panel = LinearLayout(this).apply {
+        val list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(4), dp(4), dp(8))
         }
-
-        addLabel(panel, "Día de la semana", 16f)
         val daySpinner = Spinner(this)
-        daySpinner.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, dayNames
-        )
+        daySpinner.adapter = ArrayAdapter(this,
+            android.R.layout.simple_spinner_dropdown_item, dayNames)
         daySpinner.setSelection(selectedDay)
+        list.addView(daySpinner)
+
+        val enabled = CheckBox(this).apply {
+            text = "Programación activa este día"
+            setTextColor(foreground)
+            buttonTintList = android.content.res.ColorStateList.valueOf(accent)
+        }
+        val startButton = makeButton("") {}
+        val endButton = makeButton("") {}
+        fun refreshEditor() {
+            val p = plans[selectedDay]
+            enabled.isChecked = p.enabled
+            startButton.text = "INICIO: ${p.start}"
+            endButton.text = "FIN: ${p.end}"
+        }
         daySpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
-            override fun onItemSelected(
-                parent: android.widget.AdapterView<*>?, view: View?,
-                position: Int, id: Long
-            ) {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
                 selectedDay = position
-                if (::listContainer.isInitialized) {
-                    updateCalendarList(listContainer)
-                }
+                refreshEditor()
             }
         }
-        panel.addView(daySpinner)
-
-        addLabel(panel, "Número de horario", 16f)
-        val slotSpinner = Spinner(this)
-        slotSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            (1..8).map { "Horario $it" }
-        )
-        slotSpinner.setSelection(selectedSlot)
-        slotSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
-            override fun onItemSelected(
-                parent: android.widget.AdapterView<*>?, view: View?,
-                position: Int, id: Long
-            ) {
-                selectedSlot = position
-                loadEntryIntoEditor()
-            }
-        }
-        panel.addView(slotSpinner)
-
-        addLabel(panel, "Hora (formato HH:MM)", 16f)
-        val timeInput = EditText(this).apply {
-            tag = "timeInput"
-            hint = "06:30"
-            setSingleLine(true)
-            setTextColor(white)
-            setHintTextColor(Color.LTGRAY)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-        }
-        panel.addView(timeInput)
-
-        addLabel(panel, "AM / PM", 16f)
-        val periodSpinner = Spinner(this).apply { tag = "periodSpinner" }
-        periodSpinner.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, arrayOf("AM", "PM")
-        )
-        panel.addView(periodSpinner)
-
-        addLabel(panel, "Temperatura", 16f)
-        val tempSpinner = Spinner(this).apply { tag = "tempSpinner" }
-        tempSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            (30..70 step 5).map { "$it °C" }
-        )
-        panel.addView(tempSpinner)
-
-        val activeCheck = CheckBox(this).apply {
-            tag = "activeCheck"
-            text = "Horario activado"
-            setTextColor(white)
-            isChecked = true
-        }
-        panel.addView(activeCheck)
-
-        val saveButton = makeButton("GUARDAR HORARIO") {
-            val time = timeInput.text.toString().trim()
-            val temp = 30 + tempSpinner.selectedItemPosition * 5
-            if (!time.matches(Regex("^(0[1-9]|1[0-2]):[0-5][0-9]$"))) {
-                Toast.makeText(this, "Escribe la hora como 06:30", Toast.LENGTH_LONG).show()
-            } else {
-                val period = periodSpinner.selectedItem.toString()
-                saveSchedule(selectedDay, selectedSlot, "$time $period", temp, activeCheck.isChecked)
-            }
-        }
-        panel.addView(saveButton)
-
-        panel.addView(makeButton("ELIMINAR / DESACTIVAR HORARIO") {
-            deleteSchedule(selectedDay, selectedSlot)
+        list.addView(enabled)
+        list.addView(startButton)
+        list.addView(endButton)
+        startButton.setOnClickListener { chooseTime(plans[selectedDay].start) {
+            plans[selectedDay].start = it
+            refreshEditor()
+        } }
+        endButton.setOnClickListener { chooseTime(plans[selectedDay].end) {
+            plans[selectedDay].end = it
+            refreshEditor()
+        } }
+        list.addView(makeButton("GUARDAR DÍA") {
+            plans[selectedDay].enabled = enabled.isChecked
+            savePlans()
+            Toast.makeText(this, "Horario guardado en este teléfono.", Toast.LENGTH_LONG).show()
+            refreshEditor()
         })
-
-        panel.addView(makeButton("ACTUALIZAR CALENDARIO") {
-            fetchCalendar()
+        list.addView(makeButton("DESACTIVAR DÍA") {
+            plans[selectedDay].enabled = false
+            enabled.isChecked = false
+            savePlans()
+            Toast.makeText(this, "Día desactivado.", Toast.LENGTH_SHORT).show()
         })
-
-        addLabel(panel, "Horarios guardados", 18f)
-        listContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        space(list, 8)
+        label(list, "Resumen semanal", 17f)
+        val summary = TextView(this).apply {
+            setTextColor(foreground)
+            textSize = 13f
+            setPadding(dp(8), dp(6), dp(8), dp(6))
         }
-        panel.addView(listContainer)
-
-        scroll.addView(panel)
-        contentLayout.addView(
-            scroll,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-            )
-        )
-        fetchCalendar()
+        list.addView(summary)
+        fun refreshSummary() {
+            summary.text = plans.mapIndexed { i, p ->
+                "${dayNames[i]}: " + if (p.enabled) "${p.start} – ${p.end}" else "Desactivado"
+            }.joinToString("\n")
+        }
+        refreshEditor()
+        refreshSummary()
+        list.addView(makeButton("ACTUALIZAR RESUMEN") { refreshSummary() })
+        label(list, "Nota: esta versión guarda la agenda localmente; aún no la ejecuta el ESP8266.", 11f)
+        scroll.addView(list)
+        contentLayout.addView(scroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ))
     }
 
-    private lateinit var listContainer: LinearLayout
-
-    private fun loadEntryIntoEditor() {
-        if (!::listContainer.isInitialized) return
-        val entry = calendarRows.firstOrNull {
-            it.day == selectedDay && it.slot == selectedSlot
-        } ?: return
-        val timeParts = entry.hour.split(" ")
-        if (timeParts.size == 2) {
-            val timeField = contentLayout.findViewWithTag<EditText>("timeInput")
-            timeField?.setText(timeParts[0])
-            val period = contentLayout.findViewWithTag<Spinner>("periodSpinner")
-            period?.setSelection(if (timeParts[1] == "PM") 1 else 0)
-            val temp = contentLayout.findViewWithTag<Spinner>("tempSpinner")
-            temp?.setSelection(((entry.temperature - 30) / 5).coerceIn(0, 8))
-            val active = contentLayout.findViewWithTag<CheckBox>("activeCheck")
-            active?.isChecked = entry.active
-        }
+    private fun chooseTime(current: String, onPicked: (String) -> Unit) {
+        val parts = current.trim().split(Regex("\\s+"))
+        val hm = parts[0].split(":")
+        var hour = hm[0].toIntOrNull() ?: 6
+        val minute = hm.getOrNull(1)?.toIntOrNull() ?: 0
+        if (parts.getOrNull(1) == "PM" && hour < 12) hour += 12
+        if (parts.getOrNull(1) == "AM" && hour == 12) hour = 0
+        TimePickerDialog(this, { _, h, m ->
+            val suffix = if (h < 12) "AM" else "PM"
+            val h12 = when (val v = h % 12) { 0 -> 12; else -> v }
+            onPicked(String.format(Locale.US, "%02d:%02d %s", h12, m, suffix))
+        }, hour, minute, false).show()
     }
 
-    private fun updateCalendarList(container: LinearLayout) {
-        container.removeAllViews()
-        val entries = calendarRows.filter { it.day == selectedDay }
-        if (entries.isEmpty()) {
-            addLabel(container, "No hay horarios recibidos todavía.", 13f)
-            return
+    private fun showTimer() {
+        contentLayout.removeAllViews()
+        label(contentLayout, "TEMPORIZADOR", 22f)
+        label(contentLayout, "Cuenta regresiva independiente", 13f)
+        timerText = label(contentLayout, formatDuration(remainingMs), 38f).apply {
+            setTextColor(accent)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
-        entries.sortedBy { it.slot }.forEach { entry ->
-            val line = TextView(this).apply {
-                text = "Horario ${entry.slot + 1}: ${entry.hour} · ${entry.temperature} °C · " +
-                    if (entry.active) "ACTIVO" else "INACTIVO"
-                textSize = 14f
-                setTextColor(if (entry.active) cyan else Color.LTGRAY)
-                setPadding(dp(8), dp(8), dp(8), dp(8))
-                setOnClickListener {
-                    selectedSlot = entry.slot
-                    loadEntryIntoEditor()
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Seleccionaste el horario ${entry.slot + 1}.",
-                        Toast.LENGTH_SHORT
-                    ).show()
+        val hours = NumberPicker(this).apply { minValue = 0; maxValue = 23; value = (timerDurationMs / 3600000L).toInt() }
+        val minutes = NumberPicker(this).apply { minValue = 0; maxValue = 59; value = ((timerDurationMs / 60000L) % 60).toInt() }
+        val seconds = NumberPicker(this).apply { minValue = 0; maxValue = 59; value = 0 }
+        val pickers = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(hours, LinearLayout.LayoutParams(0, dp(110), 1f))
+            addView(minutes, LinearLayout.LayoutParams(0, dp(110), 1f))
+            addView(seconds, LinearLayout.LayoutParams(0, dp(110), 1f))
+        }
+        contentLayout.addView(pickers)
+        label(contentLayout, "Horas       Minutos       Segundos", 11f)
+        contentLayout.addView(makeButton("INICIAR / REANUDAR") {
+            if (!timerRunning) {
+                if (countdown == null || remainingMs <= 0L) {
+                    timerDurationMs = hours.value * 3600000L + minutes.value * 60000L + seconds.value * 1000L
+                    remainingMs = timerDurationMs
                 }
+                if (remainingMs <= 0L) {
+                    Toast.makeText(this, "Selecciona una duración mayor que cero.", Toast.LENGTH_SHORT).show()
+                } else startCountdown()
             }
-            container.addView(line)
+        })
+        contentLayout.addView(makeButton("PAUSAR") { pauseCountdown() })
+        contentLayout.addView(makeButton("CANCELAR / REINICIAR") {
+            countdown?.cancel()
+            countdown = null
+            timerRunning = false
+            remainingMs = timerDurationMs
+            timerText.text = formatDuration(remainingMs)
+        })
+        label(contentLayout, "Al finalizar, la app avisará y cerrará el temporizador. No acciona el quemador ni una válvula de gas.", 11f)
+    }
+
+    private fun startCountdown() {
+        countdown?.cancel()
+        timerRunning = true
+        countdown = object : CountDownTimer(remainingMs, 1000L) {
+            override fun onTick(millisUntilFinished: Long) {
+                remainingMs = millisUntilFinished
+                if (::timerText.isInitialized) timerText.text = formatDuration(remainingMs)
+            }
+            override fun onFinish() {
+                remainingMs = 0L
+                timerRunning = false
+                countdown = null
+                if (::timerText.isInitialized) timerText.text = "00:00:00"
+                Toast.makeText(this@MainActivity, "Temporizador terminado.", Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
+    private fun pauseCountdown() {
+        if (timerRunning) {
+            countdown?.cancel()
+            countdown = null
+            timerRunning = false
         }
     }
 
-    private fun saveSchedule(
-        day: Int, slot: Int, hour: String, temperature: Int, active: Boolean
-    ) {
-        val encodedHour = URLEncoder.encode(hour, "UTF-8")
-        val url = "http://$deviceIp/programar?dia=$day&slot=$slot" +
-            "&hora=$encodedHour&temp=$temperature&activo=${if (active) 1 else 0}"
-        request(url) { code, body ->
-            if (code in 200..299) {
-                Toast.makeText(this, "Horario guardado en el ESP8266.", Toast.LENGTH_LONG).show()
-                fetchCalendar()
-            } else {
-                Toast.makeText(this, "No se pudo guardar ($code): $body", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    private fun deleteSchedule(day: Int, slot: Int) {
-        request("http://$deviceIp/borrar?dia=$day&slot=$slot") { code, _ ->
-            if (code in 200..299) {
-                Toast.makeText(this, "Horario desactivado.", Toast.LENGTH_SHORT).show()
-                fetchCalendar()
-            } else {
-                Toast.makeText(this, "No se pudo eliminar el horario.", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    private fun fetchCalendar() {
-        request("http://$deviceIp/calendario") { code, body ->
-            if (code !in 200..299) {
-                Toast.makeText(this, "No se pudo consultar el calendario.", Toast.LENGTH_LONG).show()
-                return@request
-            }
-            try {
-                val root = JSONObject(body)
-                val array = root.getJSONArray("calendar")
-                val result = mutableListOf<CalendarEntry>()
-                for (i in 0 until array.length()) {
-                    val item = array.getJSONObject(i)
-                    result.add(
-                        CalendarEntry(
-                            day = item.getInt("dia"),
-                            slot = item.getInt("slot"),
-                            active = item.getBoolean("activo"),
-                            hour = item.getString("hora"),
-                            temperature = item.getInt("temperatura")
-                        )
-                    )
-                }
-                calendarRows = result
-                updateNextEventLabel()
-                if (::listContainer.isInitialized) {
-                    updateCalendarList(listContainer)
-                    loadEntryIntoEditor()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(this, "Respuesta de calendario inválida: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        }
+    private fun formatDuration(ms: Long): String {
+        val total = (ms.coerceAtLeast(0L) / 1000L)
+        return String.format(Locale.US, "%02d:%02d:%02d",
+            total / 3600L, (total % 3600L) / 60L, total % 60L)
     }
 
     private fun showSettings() {
         contentLayout.removeAllViews()
-        addLabel(contentLayout, "AJUSTES", 23f)
-        addLabel(contentLayout, "Dirección del ESP8266")
-        contentLayout.addView(makeButton("Configurar dirección IP") { showIpDialog() })
-        contentLayout.addView(makeButton("Probar conexión") { checkConnection() })
-        contentLayout.addView(makeButton("Consultar estado") { checkConnection() })
-        addLabel(contentLayout, "IP actual: $deviceIp", 14f)
-        addLabel(contentLayout, "Zona horaria: Hermosillo (UTC−7)", 13f)
+        label(contentLayout, "AJUSTES", 22f)
+        label(contentLayout, "Carátula de la aplicación", 16f)
+        val themes = arrayOf("Industrial · Azul y cian", "Minimalista · Negro y blanco", "Calorex · Rojo y blanco")
+        val themeSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item, themes)
+            setSelection(themeIndex)
+        }
+        contentLayout.addView(themeSpinner)
+        contentLayout.addView(makeButton("APLICAR Y GUARDAR CARÁTULA") {
+            themeIndex = themeSpinner.selectedItemPosition
+            prefs.edit().putInt("theme", themeIndex).apply()
+            applyTheme()
+            createShell()
+            showSettings()
+            Toast.makeText(this, "Carátula guardada.", Toast.LENGTH_SHORT).show()
+        })
+        space(contentLayout, 12)
+        label(contentLayout, "Controlador ESP8266", 16f)
+        contentLayout.addView(makeButton("CONFIGURAR DIRECCIÓN IP") { showIpDialog() })
+        contentLayout.addView(makeButton("PROBAR CONEXIÓN") { checkConnection() })
+        label(contentLayout, "IP actual: $deviceIp", 13f)
+        label(contentLayout, "La agenda semanal de esta entrega se guarda localmente. La sincronización y ejecución en ESP8266 requieren actualizar también su firmware.", 12f)
     }
 
     private fun showIpDialog() {
         val input = EditText(this).apply {
             setText(deviceIp)
             setSingleLine(true)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
         }
         AlertDialog.Builder(this)
             .setTitle("Dirección IP del ESP8266")
-            .setMessage("Introduce la dirección local del controlador")
             .setView(input)
             .setPositiveButton("Guardar") { _, _ ->
-                val newIp = input.text.toString().trim()
-                if (newIp.matches(Regex("^\\d{1,3}(\\.\\d{1,3}){3}$"))) {
-                    deviceIp = newIp
+                val ip = input.text.toString().trim()
+                if (ip.matches(Regex("^\\d{1,3}(\\.\\d{1,3}){3}$"))) {
+                    deviceIp = ip
+                    prefs.edit().putString("device_ip", ip).apply()
                     checkConnection()
-                    Toast.makeText(this, "Dirección guardada", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this, "Dirección IP inválida", Toast.LENGTH_SHORT).show()
-                }
+                } else Toast.makeText(this, "Dirección IP inválida.", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
     private fun sendAngle(angle: Int) {
-        val safeAngle = angle.coerceIn(0, 180)
-        request("http://$deviceIp/mover?angulo=$safeAngle") { code, _ ->
+        val safe = angle.coerceIn(0, 180)
+        request("http://$deviceIp/mover?angulo=$safe") { code, _ ->
             setConnectionState(code in 200..299)
         }
     }
 
     private fun checkConnection() {
         request("http://$deviceIp/status") { code, body ->
-            val connected = code in 200..299
-            setConnectionState(connected)
-            if (connected) {
+            setConnectionState(code in 200..299)
+            if (code in 200..299) {
                 try {
                     val status = JSONObject(body)
                     val synced = status.optBoolean("clock_synced", false)
-                    val time = status.optString("time", "")
-                    if (::clockText.isInitialized) {
-                        clockText.text = if (synced && time.isNotBlank()) {
-                            "Hora del controlador: $time (Hermosillo)"
-                        } else {
-                            "Hora del controlador: sin sincronizar"
-                        }
+                    val controllerTime = status.optString("time", "")
+                    // The large home clock remains the phone's live 12-hour clock.
+                    if (!synced || controllerTime.isBlank()) {
+                        statusText.text = "● Conectado · reloj ESP sin sincronizar"
                     }
-                } catch (_: Exception) {
-                    if (::clockText.isInitialized) {
-                        clockText.text = "Hora del controlador: no disponible"
-                    }
-                }
-            } else if (::clockText.isInitialized) {
-                clockText.text = "Controlador sin conexión"
+                } catch (_: Exception) { }
             }
-        }
-    }
-
-    private fun updateNextEventLabel() {
-        if (!::nextEventText.isInitialized) return
-
-        // La tarjeta entrega la hora sincronizada. Para calcular el día de la semana,
-        // el teléfono también debe tener configurada la zona horaria de Hermosillo.
-        val now = java.util.Calendar.getInstance()
-        val currentDay = (now.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7
-        val currentMinutes = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 +
-            now.get(java.util.Calendar.MINUTE)
-
-        var bestDelta = Int.MAX_VALUE
-        var bestEntry: CalendarEntry? = null
-        var bestDays = 0
-
-        for (entry in calendarRows) {
-            if (!entry.active) continue
-            val parts = entry.hour.trim().split(Regex("\\s+"))
-            if (parts.size != 2) continue
-            val hm = parts[0].split(":")
-            if (hm.size != 2) continue
-
-            var hour = hm[0].toIntOrNull() ?: continue
-            val minute = hm[1].toIntOrNull() ?: continue
-            if (hour !in 1..12 || minute !in 0..59) continue
-            if (parts[1] == "AM") {
-                if (hour == 12) hour = 0
-            } else if (parts[1] == "PM") {
-                if (hour != 12) hour += 12
-            } else continue
-
-            val eventMinutes = hour * 60 + minute
-            val daysAhead = (entry.day - currentDay + 7) % 7
-            var delta = daysAhead * 1440 + eventMinutes - currentMinutes
-            if (delta <= 0) delta += 7 * 1440
-
-            if (delta < bestDelta) {
-                bestDelta = delta
-                bestEntry = entry
-                bestDays = daysAhead
-            }
-        }
-
-        val entry = bestEntry
-        if (entry == null) {
-            nextEventText.text = "Próximo cambio: no hay horarios activos"
-        } else {
-            val dayLabel = if (bestDays == 0) "Hoy" else dayNames[entry.day]
-            nextEventText.text =
-                "Próximo cambio: $dayLabel · ${entry.hour} · ${entry.temperature} °C"
         }
     }
 
@@ -672,11 +519,31 @@ class MainActivity : Activity() {
         isConnected = connected
         if (::statusText.isInitialized) {
             statusText.text = if (connected) "● Conectado" else "● Desconectado"
-            statusText.setTextColor(if (connected) green else Color.LTGRAY)
+            statusText.setTextColor(if (connected) success else Color.LTGRAY)
+        }
+    }
+
+    private fun savePlans() {
+        val editor = prefs.edit()
+        plans.forEachIndexed { i, p ->
+            editor.putBoolean("day_${i}_enabled", p.enabled)
+            editor.putString("day_${i}_start", p.start)
+            editor.putString("day_${i}_end", p.end)
+        }
+        editor.apply()
+    }
+
+    private fun loadPlans() {
+        plans.forEachIndexed { i, p ->
+            p.enabled = prefs.getBoolean("day_${i}_enabled", false)
+            p.start = prefs.getString("day_${i}_start", p.start) ?: p.start
+            p.end = prefs.getString("day_${i}_end", p.end) ?: p.end
         }
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(clockRunnable)
+        countdown?.cancel()
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -686,81 +553,63 @@ class MainActivity : Activity() {
         var onAngleChanged: ((Int) -> Unit)? = null
         var onAngleSelected: ((Int) -> Unit)? = null
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var centerX = 0f
-        private var centerY = 0f
+        private var cx = 0f
+        private var cy = 0f
         private var radius = 0f
 
         init { setLayerType(View.LAYER_TYPE_SOFTWARE, null) }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            centerX = width / 2f
-            centerY = height / 2f
-            radius = min(width, height) * 0.36f
-            val rect = RectF(
-                centerX - radius, centerY - radius,
-                centerX + radius, centerY + radius
-            )
+            cx = width / 2f
+            cy = height / 2f
+            radius = min(width, height) * 0.34f
+            val rect = RectF(cx - radius, cy - radius, cx + radius, cy + radius)
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = dp(9).toFloat()
-            paint.color = Color.rgb(55, 80, 115)
+            paint.color = Color.rgb(65, 82, 105)
             canvas.drawArc(rect, 135f, 270f, false, paint)
-            paint.color = cyan
+            paint.color = accent
             canvas.drawArc(rect, 135f, angle / 180f * 270f, false, paint)
 
-            for (value in 0..180 step 5) {
-                val degrees = 135f + value / 180f * 270f
-                val radians = Math.toRadians(degrees.toDouble())
-                val outer = radius + dp(12)
+            for (v in 0..180 step 5) {
+                val a = Math.toRadians((135f + v / 180f * 270f).toDouble())
                 val inner = radius - dp(5)
-                val x1 = centerX + cos(radians).toFloat() * inner
-                val y1 = centerY + sin(radians).toFloat() * inner
-                val x2 = centerX + cos(radians).toFloat() * outer
-                val y2 = centerY + sin(radians).toFloat() * outer
-                paint.color = if (value <= angle) cyan else Color.LTGRAY
-                paint.strokeWidth = if (value % 15 == 0) dp(3).toFloat() else dp(1).toFloat()
-                canvas.drawLine(x1, y1, x2, y2, paint)
-                if (value % 15 == 0) {
-                    paint.style = Paint.Style.FILL
-                    paint.textSize = dp(11).toFloat()
-                    paint.textAlign = Paint.Align.CENTER
-                    val labelRadius = radius + dp(31)
-                    val tx = centerX + cos(radians).toFloat() * labelRadius
-                    val ty = centerY + sin(radians).toFloat() * labelRadius + dp(4)
-                    canvas.drawText("$value°", tx, ty, paint)
-                    paint.style = Paint.Style.STROKE
-                }
+                val outer = radius + dp(11)
+                paint.color = if (v <= angle) accent else Color.LTGRAY
+                paint.strokeWidth = if (v % 15 == 0) dp(3).toFloat() else dp(1).toFloat()
+                canvas.drawLine(
+                    cx + cos(a).toFloat() * inner, cy + sin(a).toFloat() * inner,
+                    cx + cos(a).toFloat() * outer, cy + sin(a).toFloat() * outer, paint
+                )
             }
-
-            val pointerDegrees = 135f + angle / 180f * 270f
-            val pointerRadians = Math.toRadians(pointerDegrees.toDouble())
-            val px = centerX + cos(pointerRadians).toFloat() * radius
-            val py = centerY + sin(pointerRadians).toFloat() * radius
+            val pointer = Math.toRadians((135f + angle / 180f * 270f).toDouble())
             paint.style = Paint.Style.FILL
-            paint.color = cyan
-            canvas.drawCircle(px, py, dp(10).toFloat(), paint)
-            paint.color = white
+            paint.color = accent
+            canvas.drawCircle(cx + cos(pointer).toFloat() * radius,
+                cy + sin(pointer).toFloat() * radius, dp(9).toFloat(), paint)
+            paint.color = foreground
             paint.textAlign = Paint.Align.CENTER
-            paint.textSize = dp(24).toFloat()
+            paint.textSize = dp(23).toFloat()
             paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-            canvas.drawText("$angle°", centerX, centerY + dp(8), paint)
-            paint.textSize = dp(12).toFloat()
+            canvas.drawText("$angle°", cx, cy + dp(8), paint)
+            paint.textSize = dp(11).toFloat()
             paint.typeface = android.graphics.Typeface.DEFAULT
-            canvas.drawText("PASO 5°", centerX, centerY + dp(32), paint)
+            canvas.drawText("PRUEBA SIN CARGA", cx, cy + dp(30), paint)
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
             when (event.action) {
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                    val dx = event.x - centerX
-                    val dy = event.y - centerY
+                    val dx = event.x - cx
+                    val dy = event.y - cy
                     var degrees = Math.toDegrees(atan2(dy, dx).toDouble()).toFloat()
                     if (degrees < 0) degrees += 360f
                     var normalized = degrees - 135f
                     if (normalized < 0) normalized += 360f
                     normalized = normalized.coerceIn(0f, 270f)
-                    val rawAngle = (normalized / 270f * 180f).roundToInt()
-                    angle = ((rawAngle + 2) / 5 * 5).coerceIn(0, 180)
+                    val raw = (normalized / 270f * 180f).roundToInt()
+                    angle = ((raw + 2) / 5 * 5).coerceIn(0, 180)
                     onAngleChanged?.invoke(angle)
                     invalidate()
                     return true
