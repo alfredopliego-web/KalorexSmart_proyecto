@@ -1,4 +1,3 @@
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -6,8 +5,8 @@ plugins {
 
 android {
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
@@ -15,6 +14,6 @@ android {
     }
 }
 
-tasks.withType(JavaCompile).configureEach {
-    options.release = 17
+tasks.withType<JavaCompile>().configureEach {
+    options.release.set(17)
 }
