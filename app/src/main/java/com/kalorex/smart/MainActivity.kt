@@ -1,4 +1,4 @@
-package com.kalorex.smart
+package com.kalorex.demo
 
 import android.app.Activity
 import android.graphics.Canvas
