@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.kalorex.demo"
+    namespace = "com.kalorex.smart"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.kalorex.demo"
+        applicationId = "com.kalorex.smart"
         minSdk = 23
         targetSdk = 35
         versionCode = 1
