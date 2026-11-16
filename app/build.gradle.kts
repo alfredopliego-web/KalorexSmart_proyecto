@@ -1,4 +1,3 @@
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -24,8 +23,4 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-}
-
-tasks.withType<JavaCompile>().configureEach {
-    options.release.set(17)
 }
