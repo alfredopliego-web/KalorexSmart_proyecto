@@ -1,4 +1,4 @@
-package com.kalorex.demo
+package com.kalorex.smart
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -57,11 +57,11 @@ class MainActivity : Activity() {
 
     private val plans = MutableList(7) { DayPlan() }
 
-    private var background = Color.rgb(7, 20, 43)
-    private var panel = Color.rgb(14, 34, 64)
-    private var accent = Color.rgb(0, 220, 255)
-    private var foreground = Color.WHITE
-    private var success = Color.rgb(30, 220, 75)
+    private var bgColor = Color.rgb(7, 20, 43)
+    private var panelColor = Color.rgb(14, 34, 64)
+    private var accentColor = Color.rgb(0, 220, 255)
+    private var textColor = Color.WHITE
+    private var successColor = Color.rgb(30, 220, 75)
 
     private lateinit var mainLayout: LinearLayout
     private lateinit var contentLayout: LinearLayout
@@ -99,25 +99,25 @@ class MainActivity : Activity() {
     private fun applyTheme() {
         when (themeIndex) {
             0 -> {
-                background = Color.rgb(7, 20, 43)
-                panel = Color.rgb(14, 34, 64)
-                accent = Color.rgb(0, 220, 255)
-                foreground = Color.WHITE
-                success = Color.rgb(30, 220, 75)
+                bgColor = Color.rgb(7, 20, 43)
+                panelColor = Color.rgb(14, 34, 64)
+                accentColor = Color.rgb(0, 220, 255)
+                textColor = Color.WHITE
+                successColor = Color.rgb(30, 220, 75)
             }
             1 -> {
-                background = Color.rgb(12, 12, 14)
-                panel = Color.rgb(31, 31, 34)
-                accent = Color.rgb(235, 235, 235)
-                foreground = Color.WHITE
-                success = Color.rgb(80, 210, 130)
+                bgColor = Color.rgb(12, 12, 14)
+                panelColor = Color.rgb(31, 31, 34)
+                accentColor = Color.rgb(235, 235, 235)
+                textColor = Color.WHITE
+                successColor = Color.rgb(80, 210, 130)
             }
             else -> {
-                background = Color.rgb(248, 247, 245)
-                panel = Color.WHITE
-                accent = Color.rgb(190, 20, 48)
-                foreground = Color.rgb(45, 48, 52)
-                success = Color.rgb(30, 155, 75)
+                bgColor = Color.rgb(248, 247, 245)
+                panelColor = Color.WHITE
+                accentColor = Color.rgb(190, 20, 48)
+                textColor = Color.rgb(45, 48, 52)
+                successColor = Color.rgb(30, 155, 75)
             }
         }
     }
@@ -125,7 +125,7 @@ class MainActivity : Activity() {
     private fun createShell() {
         mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(background)
+            setBackgroundColor(bgColor)
             setPadding(dp(14), dp(8), dp(14), dp(6))
         }
 
@@ -136,14 +136,14 @@ class MainActivity : Activity() {
         val title = TextView(this).apply {
             text = "🔥 KalorexSmart"
             textSize = 23f
-            setTextColor(foreground)
+            setTextColor(textColor)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
         header.addView(title, LinearLayout.LayoutParams(0, dp(48), 1f))
         statusText = TextView(this).apply {
             text = "● Revisando"
             textSize = 12f
-            setTextColor(foreground)
+            setTextColor(textColor)
         }
         header.addView(statusText)
         header.addView(makeButton("IP") { showIpDialog() })
@@ -154,13 +154,13 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         mainLayout.addView(contentLayout, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
         val nav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setBackgroundColor(panel)
+            setBackgroundColor(panelColor)
         }
         listOf(
             "⌂\nHome" to { showHome() },
@@ -179,8 +179,8 @@ class MainActivity : Activity() {
         Button(this).apply {
             text = label
             textSize = 12f
-            setTextColor(foreground)
-            setBackgroundColor(panel)
+            setTextColor(textColor)
+            setBackgroundColor(panelColor)
             isAllCaps = false
             minHeight = dp(42)
             setPadding(dp(4), dp(2), dp(4), dp(2))
@@ -191,7 +191,7 @@ class MainActivity : Activity() {
         val t = TextView(this).apply {
             text = value
             textSize = size
-            setTextColor(foreground)
+            setTextColor(textColor)
             gravity = Gravity.CENTER
             setPadding(dp(4), dp(5), dp(4), dp(5))
         }
@@ -207,14 +207,14 @@ class MainActivity : Activity() {
         contentLayout.removeAllViews()
         label(contentLayout, "CONTROL MANUAL DE POSICIÓN", 14f)
         clockText = label(contentLayout, "12:00:00 PM", 25f).apply {
-            setTextColor(accent)
+            setTextColor(accentColor)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
         label(contentLayout, "Hora local del teléfono", 11f)
         space(contentLayout, 3)
         label(contentLayout, "Posición de prueba", 15f)
         angleText = label(contentLayout, "$currentAngle°", 31f).apply {
-            setTextColor(accent)
+            setTextColor(accentColor)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
         dial = ServoDial(this).apply {
@@ -235,7 +235,7 @@ class MainActivity : Activity() {
             }
         }
         contentLayout.addView(dial, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
         label(contentLayout, "Desliza el indicador para seleccionar una posición", 11f)
         contentLayout.addView(makeButton("REGRESAR INDICADOR A 0°") {
@@ -244,7 +244,7 @@ class MainActivity : Activity() {
             dial.angle = 0
             dial.invalidate()
             Toast.makeText(this, "Indicador en cero. No se envió movimiento al servo.", Toast.LENGTH_LONG).show()
-        }, LinearLayout.LayoutParams(LinearLayout.MATCH_PARENT, dp(46)))
+        }, LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, dp(46)))
     }
 
     private fun showCalendar() {
@@ -265,8 +265,8 @@ class MainActivity : Activity() {
 
         val enabled = CheckBox(this).apply {
             text = "Programación activa este día"
-            setTextColor(foreground)
-            buttonTintList = android.content.res.ColorStateList.valueOf(accent)
+            setTextColor(textColor)
+            buttonTintList = android.content.res.ColorStateList.valueOf(accentColor)
         }
         val startButton = makeButton("") {}
         val endButton = makeButton("") {}
@@ -309,7 +309,7 @@ class MainActivity : Activity() {
         space(list, 8)
         label(list, "Resumen semanal", 17f)
         val summary = TextView(this).apply {
-            setTextColor(foreground)
+            setTextColor(textColor)
             textSize = 13f
             setPadding(dp(8), dp(6), dp(8), dp(6))
         }
@@ -325,7 +325,7 @@ class MainActivity : Activity() {
         label(list, "Nota: esta versión guarda la agenda localmente; aún no la ejecuta el ESP8266.", 11f)
         scroll.addView(list)
         contentLayout.addView(scroll, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
     }
 
@@ -348,7 +348,7 @@ class MainActivity : Activity() {
         label(contentLayout, "TEMPORIZADOR", 22f)
         label(contentLayout, "Cuenta regresiva independiente", 13f)
         timerText = label(contentLayout, formatDuration(remainingMs), 38f).apply {
-            setTextColor(accent)
+            setTextColor(accentColor)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
         val hours = NumberPicker(this).apply { minValue = 0; maxValue = 23; value = (timerDurationMs / 3600000L).toInt() }
@@ -519,7 +519,7 @@ class MainActivity : Activity() {
         isConnected = connected
         if (::statusText.isInitialized) {
             statusText.text = if (connected) "● Conectado" else "● Desconectado"
-            statusText.setTextColor(if (connected) success else Color.LTGRAY)
+            statusText.setTextColor(if (connected) successColor else Color.LTGRAY)
         }
     }
 
@@ -569,14 +569,14 @@ class MainActivity : Activity() {
             paint.strokeWidth = dp(9).toFloat()
             paint.color = Color.rgb(65, 82, 105)
             canvas.drawArc(rect, 135f, 270f, false, paint)
-            paint.color = accent
+            paint.color = accentColor
             canvas.drawArc(rect, 135f, angle / 180f * 270f, false, paint)
 
             for (v in 0..180 step 5) {
                 val a = Math.toRadians((135f + v / 180f * 270f).toDouble())
                 val inner = radius - dp(5)
                 val outer = radius + dp(11)
-                paint.color = if (v <= angle) accent else Color.LTGRAY
+                paint.color = if (v <= angle) accentColor else Color.LTGRAY
                 paint.strokeWidth = if (v % 15 == 0) dp(3).toFloat() else dp(1).toFloat()
                 canvas.drawLine(
                     cx + cos(a).toFloat() * inner, cy + sin(a).toFloat() * inner,
@@ -585,10 +585,10 @@ class MainActivity : Activity() {
             }
             val pointer = Math.toRadians((135f + angle / 180f * 270f).toDouble())
             paint.style = Paint.Style.FILL
-            paint.color = accent
+            paint.color = accentColor
             canvas.drawCircle(cx + cos(pointer).toFloat() * radius,
                 cy + sin(pointer).toFloat() * radius, dp(9).toFloat(), paint)
-            paint.color = foreground
+            paint.color = textColor
             paint.textAlign = Paint.Align.CENTER
             paint.textSize = dp(23).toFloat()
             paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
