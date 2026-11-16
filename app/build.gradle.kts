@@ -1,7 +1,9 @@
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
 android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -9,7 +11,10 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = '17'
+        jvmTarget = "17"
     }
 }
 
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
