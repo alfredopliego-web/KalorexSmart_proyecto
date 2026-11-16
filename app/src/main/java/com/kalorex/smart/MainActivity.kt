@@ -1,4 +1,4 @@
-package com.kalorex.demo
+package com.kalorex.smart
 
 import android.app.Activity
 import android.app.AlertDialog
