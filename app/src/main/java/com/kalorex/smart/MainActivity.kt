@@ -2,6 +2,7 @@
 package com.kalorex.demo
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -11,9 +12,9 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.EditText
 import android.widget.Toast
 import java.net.HttpURLConnection
 import java.net.URL
@@ -21,284 +22,553 @@ import java.util.concurrent.Executors
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 class MainActivity : Activity() {
 
-    companion object {
-        private const val WRAP = -2
-        private const val HOME_ESP_IP = "192.168.1.188"
-        private const val DIRECT_ESP_IP = "192.168.4.1"
-    }
-
     private val executor = Executors.newSingleThreadExecutor()
 
-    private lateinit var ipInput: EditText
-    private lateinit var status: TextView
+    private val backgroundColor = Color.rgb(7, 20, 43)
+    private val cardColor = Color.rgb(14, 34, 64)
+    private val cyan = Color.rgb(0, 220, 255)
+    private val white = Color.WHITE
+    private val green = Color.rgb(30, 220, 75)
+
+    private var deviceIp = "192.168.1.188"
+    private var currentAngle = 90
+    private var selectedTemperature = 50
+    private var isConnected = false
+    private var powerOn = false
+
+    private lateinit var statusText: TextView
+    private lateinit var temperatureText: TextView
     private lateinit var angleText: TextView
     private lateinit var dial: ServoDial
 
-    private var angle = 0
-    private var activeIp: String? = null
+    private lateinit var mainLayout: LinearLayout
+    private lateinit var contentLayout: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        window.decorView.setBackgroundColor(Color.rgb(16, 24, 32))
+        createInterface()
+        checkConnection()
+    }
 
-        val root = LinearLayout(this).apply {
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).toInt()
+    }
+
+    private fun createInterface() {
+
+        mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(24, 28, 24, 24)
+            setBackgroundColor(backgroundColor)
+            setPadding(dp(14), dp(12), dp(14), dp(8))
         }
 
-        root.addView(TextView(this).apply {
-            text = "KalorexSmart"
-            textSize = 30f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-        }, match(WRAP))
+        // ENCABEZADO
 
-        root.addView(TextView(this).apply {
-            text = "CONTROL DE SERVOMOTOR"
-            textSize = 12f
-            setTextColor(Color.LTGRAY)
-            gravity = Gravity.CENTER
-        }, match(WRAP))
-
-        status = TextView(this).apply {
-            text = "● Buscando ESP8266..."
-            textSize = 14f
-            setTextColor(Color.YELLOW)
-            gravity = Gravity.CENTER
-            setPadding(0, 18, 0, 8)
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
 
-        root.addView(status, match(WRAP))
-
-        ipInput = EditText(this).apply {
-            setSingleLine(true)
-            hint = "IP del ESP8266"
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.GRAY)
-            setPadding(18, 8, 18, 8)
-            setBackgroundColor(Color.rgb(37, 49, 61))
-            setText(HOME_ESP_IP)
+        val title = TextView(this).apply {
+            text = "🔥 KalorexSmart"
+            textSize = 24f
+            setTextColor(white)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
 
-        root.addView(ipInput, match(WRAP))
-
-        val check = Button(this).apply {
-            text = "PROBAR CONEXIÓN"
-            setOnClickListener { checkConnection() }
-        }
-
-        root.addView(check, match(WRAP))
-
-        angleText = TextView(this).apply {
-            text = "0°"
-            textSize = 42f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            setPadding(0, 10, 0, 0)
-        }
-
-        root.addView(angleText, match(WRAP))
-
-        dial = ServoDial(this) { value ->
-            angle = value
-            angleText.text = "$value°"
-            sendAngle(value)
-        }
-
-        root.addView(
-            dial,
-            LinearLayout.LayoutParams(-1, 0, 1f)
+        header.addView(
+            title,
+            LinearLayout.LayoutParams(0, dp(55), 1f)
         )
 
-        val buttons = LinearLayout(this).apply {
+        statusText = TextView(this).apply {
+            text = "● Desconectado"
+            textSize = 13f
+            setTextColor(Color.LTGRAY)
+            gravity = Gravity.CENTER
+        }
+
+        header.addView(statusText)
+
+        val ipButton = makeButton("IP") {
+            showIpDialog()
+        }
+
+        header.addView(ipButton)
+
+        mainLayout.addView(header)
+
+        // CONTENIDO PRINCIPAL
+
+        contentLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+
+        mainLayout.addView(
+            contentLayout,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
+
+        // NAVEGACION INFERIOR
+
+        val navigation = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(cardColor)
+        }
+
+        navigation.addView(
+            makeButton("⌂\nHome") { showHome() },
+            LinearLayout.LayoutParams(0, dp(60), 1f)
+        )
+
+        navigation.addView(
+            makeButton("◉\nControl") { showControl() },
+            LinearLayout.LayoutParams(0, dp(60), 1f)
+        )
+
+        navigation.addView(
+            makeButton("⚙\nAjustes") { showSettings() },
+            LinearLayout.LayoutParams(0, dp(60), 1f)
+        )
+
+        mainLayout.addView(navigation)
+
+        setContentView(mainLayout)
+
+        showHome()
+    }
+
+    private fun makeButton(
+        label: String,
+        action: () -> Unit
+    ): Button {
+
+        return Button(this).apply {
+            text = label
+            textSize = 14f
+            setTextColor(white)
+            setBackgroundColor(cardColor)
+            isAllCaps = false
+            setOnClickListener { action() }
+        }
+    }
+
+    private fun addLabel(
+        parent: LinearLayout,
+        value: String,
+        size: Float = 18f
+    ): TextView {
+
+        val text = TextView(this).apply {
+            this.text = value
+            textSize = size
+            setTextColor(white)
+            gravity = Gravity.CENTER
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+        }
+
+        parent.addView(text)
+
+        return text
+    }
+
+    // ==========================================
+    // HOME
+    // ==========================================
+
+    private fun showHome() {
+
+        contentLayout.removeAllViews()
+
+        addLabel(contentLayout, "CONTROL DE TEMPERATURA", 15f)
+
+        addLabel(contentLayout, "Día", 20f)
+
+        angleText = addLabel(
+            contentLayout,
+            "$currentAngle°",
+            34f
+        ).apply {
+            setTextColor(cyan)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+
+        dial = ServoDial(this).apply {
+            angle = currentAngle
+            onAngleChanged = { value ->
+                currentAngle = value
+                angleText.text = "$value°"
+            }
+            onAngleSelected = { value ->
+                currentAngle = value
+                angleText.text = "$value°"
+                sendAngle(value)
+            }
+        }
+
+        contentLayout.addView(
+            dial,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
+
+        addLabel(contentLayout, "Paso de selección: 5°", 13f)
+
+        // TEMPERATURA
+
+        addLabel(contentLayout, "Temperatura", 20f)
+
+        temperatureText = addLabel(
+            contentLayout,
+            "$selectedTemperature °C",
+            24f
+        ).apply {
+            setTextColor(cyan)
+        }
+
+        val temperatures = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
 
-        buttons.addView(Button(this).apply {
-            text = "0°"
-            setOnClickListener { setAngle(0) }
-        })
+        for (temp in 10..80 step 10) {
 
-        buttons.addView(Button(this).apply {
-            text = "90°"
-            setOnClickListener { setAngle(90) }
-        })
+            val button = Button(this).apply {
+                text = "$temp"
+                textSize = 11f
+                isAllCaps = false
+                setTextColor(
+                    if (temp == selectedTemperature) cyan else white
+                )
+                setBackgroundColor(
+                    if (temp == selectedTemperature)
+                        Color.rgb(20, 65, 100)
+                    else cardColor
+                )
 
-        buttons.addView(Button(this).apply {
-            text = "180°"
-            setOnClickListener { setAngle(180) }
-        })
+                setOnClickListener {
+                    selectedTemperature = temp
+                    temperatureText.text = "$temp °C"
+                    showHome()
+                }
+            }
 
-        root.addView(buttons, match(WRAP))
+            temperatures.addView(
+                button,
+                LinearLayout.LayoutParams(
+                    0,
+                    dp(48),
+                    1f
+                )
+            )
+        }
 
-        root.addView(TextView(this).apply {
-            text = "Celular y ESP8266 deben estar conectados a una red que permita comunicarse con la tarjeta. Usa solo en banco de pruebas; no conectes este prototipo a una válvula de gas."
-            textSize = 12f
-            setTextColor(Color.LTGRAY)
+        contentLayout.addView(temperatures)
+
+        // ENCENDIDO / APAGADO
+
+        val powerButtons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(8, 16, 8, 0)
-        }, match(WRAP))
+        }
 
-        setContentView(root)
+        val offButton = Button(this).apply {
+            text = "⏻ Apagado"
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(white)
+            setBackgroundColor(
+                if (!powerOn) Color.DKGRAY else cardColor
+            )
 
-        checkConnection()
-    }
-
-    private fun match(height: Int) =
-        LinearLayout.LayoutParams(-1, height)
-
-    private fun setAngle(value: Int) {
-        angle = value
-        angleText.text = "$value°"
-        dial.setValue(value)
-        sendAngle(value)
-    }
-
-    private fun host(): String {
-        return ipInput.text.toString()
-            .trim()
-            .removePrefix("http://")
-            .removeSuffix("/")
-    }
-
-    // ==================================
-    // CONEXION AUTOMATICA DOBLE
-    // ==================================
-
-    private fun requestAuto(path: String): String? {
-
-        val addresses = listOf(
-            host(),
-            HOME_ESP_IP,
-            DIRECT_ESP_IP
-        ).filter { it.isNotBlank() }.distinct()
-
-        for (address in addresses) {
-
-            val result = request("http://$address$path")
-
-            if (result != null) {
-                activeIp = address
-                return result
+            setOnClickListener {
+                powerOn = false
+                showHome()
+                Toast.makeText(
+                    this@MainActivity,
+                    "Modo apagado seleccionado",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
 
-        activeIp = null
-        return null
+        val onButton = Button(this).apply {
+            text = "⏻ Encendido"
+            textSize = 14f
+            isAllCaps = false
+            setTextColor(white)
+            setBackgroundColor(
+                if (powerOn) green else cardColor
+            )
+
+            setOnClickListener {
+                powerOn = true
+                showHome()
+                Toast.makeText(
+                    this@MainActivity,
+                    "Modo encendido seleccionado",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        powerButtons.addView(
+            offButton,
+            LinearLayout.LayoutParams(0, dp(55), 1f)
+        )
+
+        powerButtons.addView(
+            onButton,
+            LinearLayout.LayoutParams(0, dp(55), 1f)
+        )
+
+        contentLayout.addView(powerButtons)
     }
 
-    // ==================================
-    // COMPROBAR CONEXION
-    // ==================================
+    // ==========================================
+    // CONTROL
+    // ==========================================
+
+    private fun showControl() {
+
+        contentLayout.removeAllViews()
+
+        addLabel(contentLayout, "CONTROL MANUAL", 22f)
+
+        addLabel(
+            contentLayout,
+            "Posición solicitada: $currentAngle°",
+            20f
+        )
+
+        val minus = makeButton("− 5°") {
+            changeAngle(-5)
+        }
+
+        val plus = makeButton("+ 5°") {
+            changeAngle(5)
+        }
+
+        contentLayout.addView(minus)
+        contentLayout.addView(plus)
+
+        addLabel(
+            contentLayout,
+            "Temperatura seleccionada: $selectedTemperature °C"
+        )
+
+        val send = makeButton("ENVIAR POSICIÓN") {
+            sendAngle(currentAngle)
+        }
+
+        contentLayout.addView(send)
+    }
+
+    private fun changeAngle(amount: Int) {
+
+        currentAngle = (currentAngle + amount).coerceIn(0, 180)
+
+        sendAngle(currentAngle)
+
+        showControl()
+    }
+
+    // ==========================================
+    // AJUSTES
+    // ==========================================
+
+    private fun showSettings() {
+
+        contentLayout.removeAllViews()
+
+        addLabel(contentLayout, "AJUSTES", 23f)
+
+        addLabel(
+            contentLayout,
+            "Dirección del ESP8266"
+        )
+
+        contentLayout.addView(
+            makeButton("Configurar dirección IP") {
+                showIpDialog()
+            }
+        )
+
+        contentLayout.addView(
+            makeButton("Probar conexión") {
+                checkConnection()
+            }
+        )
+
+        contentLayout.addView(
+            makeButton("Consultar estado") {
+                checkConnection()
+            }
+        )
+
+        addLabel(
+            contentLayout,
+            "IP actual: $deviceIp",
+            14f
+        )
+    }
+
+    // ==========================================
+    // CONFIGURAR IP
+    // ==========================================
+
+    private fun showIpDialog() {
+
+        val input = EditText(this).apply {
+            setText(deviceIp)
+            setSingleLine(true)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Dirección IP del ESP8266")
+            .setMessage("Introduce la dirección local del controlador")
+            .setView(input)
+            .setPositiveButton("Guardar") { _, _ ->
+
+                val newIp = input.text.toString().trim()
+
+                if (newIp.matches(
+                        Regex("^\\d{1,3}(\\.\\d{1,3}){3}$")
+                    )
+                ) {
+                    deviceIp = newIp
+                    checkConnection()
+                    Toast.makeText(
+                        this,
+                        "Dirección guardada",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Dirección IP inválida",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    // ==========================================
+    // COMUNICACION CON ESP8266
+    // ==========================================
+
+    private fun sendAngle(angle: Int) {
+
+        val safeAngle = angle.coerceIn(0, 180)
+
+        executor.execute {
+
+            var connection: HttpURLConnection? = null
+
+            try {
+
+                val url = URL(
+                    "http://$deviceIp/mover?angulo=$safeAngle"
+                )
+
+                connection = url.openConnection()
+                    as HttpURLConnection
+
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 2000
+                connection.readTimeout = 2000
+                connection.useCaches = false
+
+                val responseCode = connection.responseCode
+
+                runOnUiThread {
+
+                    if (responseCode in 200..299) {
+                        setConnectionState(true)
+                    } else {
+                        setConnectionState(false)
+                    }
+                }
+
+            } catch (e: Exception) {
+
+                runOnUiThread {
+                    setConnectionState(false)
+                }
+
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
 
     private fun checkConnection() {
 
-        status.text = "Buscando ESP8266..."
-        status.setTextColor(Color.YELLOW)
-
         executor.execute {
 
-            val result = requestAuto("/status")
+            var connection: HttpURLConnection? = null
 
-            runOnUiThread {
+            try {
 
-                if (result != null) {
+                val url = URL("http://$deviceIp/status")
 
-                    status.text =
-                        "● ESP8266 conectado: $activeIp"
+                connection = url.openConnection()
+                    as HttpURLConnection
 
-                    status.setTextColor(Color.GREEN)
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 2000
+                connection.readTimeout = 2000
+                connection.useCaches = false
 
-                } else {
+                val responseCode = connection.responseCode
 
-                    status.text =
-                        "● Sin conexión. Revisa Wi-Fi."
-
-                    status.setTextColor(Color.YELLOW)
+                runOnUiThread {
+                    setConnectionState(responseCode in 200..299)
                 }
+
+            } catch (e: Exception) {
+
+                runOnUiThread {
+                    setConnectionState(false)
+                }
+
+            } finally {
+                connection?.disconnect()
             }
         }
     }
 
-    // ==================================
-    // ENVIAR ANGULO AL SERVO
-    // ==================================
+    private fun setConnectionState(connected: Boolean) {
 
-    private fun sendAngle(value: Int) {
+        isConnected = connected
 
-        if (value !in 0..180) return
+        if (::statusText.isInitialized) {
 
-        status.text = "Enviando orden..."
-        status.setTextColor(Color.YELLOW)
+            statusText.text =
+                if (connected) "● Conectado"
+                else "● Desconectado"
 
-        executor.execute {
-
-            val result = requestAuto(
-                "/mover?angulo=$value"
+            statusText.setTextColor(
+                if (connected) green else Color.LTGRAY
             )
-
-            runOnUiThread {
-
-                if (result != null) {
-
-                    status.text =
-                        "● Orden enviada: $value° ($activeIp)"
-
-                    status.setTextColor(Color.GREEN)
-
-                } else {
-
-                    status.text =
-                        "● No responde el ESP8266"
-
-                    status.setTextColor(Color.YELLOW)
-                }
-            }
-        }
-    }
-
-    // ==================================
-    // SOLICITUD HTTP
-    // ==================================
-
-    private fun request(address: String): String? {
-
-        var connection: HttpURLConnection? = null
-
-        return try {
-
-            connection =
-                (URL(address).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 1500
-                    readTimeout = 1500
-                    useCaches = false
-                }
-
-            val code = connection.responseCode
-
-            if (code !in 200..299) {
-                null
-            } else {
-                connection.inputStream.bufferedReader().use {
-                    it.readText()
-                }
-            }
-
-        } catch (_: Exception) {
-
-            null
-
-        } finally {
-
-            connection?.disconnect()
         }
     }
 
@@ -307,131 +577,217 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    // ==================================
-    // PERILLA GRAFICA
-    // ==================================
+    // ==========================================
+    // DIAL PERSONALIZADO
+    // ==========================================
 
-    private class ServoDial(
-        ctx: android.content.Context,
-        val onChange: (Int) -> Unit
-    ) : View(ctx) {
+    inner class ServoDial(context: android.content.Context) :
+        View(context) {
 
-        private val track = Paint(3).apply {
-            color = Color.rgb(57, 72, 86)
-            style = Paint.Style.STROKE
-            strokeWidth = 24f
-            strokeCap = Paint.Cap.ROUND
-        }
+        var angle = 90
+        var onAngleChanged: ((Int) -> Unit)? = null
+        var onAngleSelected: ((Int) -> Unit)? = null
 
-        private val active = Paint(3).apply {
-            color = Color.rgb(22, 166, 160)
-            style = Paint.Style.STROKE
-            strokeWidth = 24f
-            strokeCap = Paint.Cap.ROUND
-        }
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-        private val knob = Paint(3).apply {
-            color = Color.WHITE
-            style = Paint.Style.FILL
-        }
+        private var centerX = 0f
+        private var centerY = 0f
+        private var radius = 0f
 
-        private val bounds = RectF()
-
-        private var value = 0
-
-        fun setValue(v: Int) {
-            value = v.coerceIn(0, 180)
-            invalidate()
+        init {
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         }
 
         override fun onDraw(canvas: Canvas) {
-
             super.onDraw(canvas)
 
-            val size = min(width * .78f, height * .78f)
-            val cx = width / 2f
-            val cy = height / 2f
+            centerX = width / 2f
+            centerY = height / 2f
 
-            bounds.set(
-                cx - size / 2,
-                cy - size / 2,
-                cx + size / 2,
-                cy + size / 2
+            radius = min(width, height) * 0.36f
+
+            val rect = RectF(
+                centerX - radius,
+                centerY - radius,
+                centerX + radius,
+                centerY + radius
             )
+
+            // ARCO DE FONDO
+
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = dp(9).toFloat()
+            paint.color = Color.rgb(55, 80, 115)
 
             canvas.drawArc(
-                bounds, 135f, 270f, false, track
+                rect,
+                135f,
+                270f,
+                false,
+                paint
             )
+
+            // ARCO ACTIVO
+
+            paint.color = cyan
 
             canvas.drawArc(
-                bounds, 135f, value * 1.5f, false, active
+                rect,
+                135f,
+                angle / 180f * 270f,
+                false,
+                paint
             )
 
-            val radians = Math.toRadians(
-                (135 + value * 1.5).toDouble()
-            )
+            // MARCAS CADA 5 GRADOS
 
-            canvas.drawCircle(
-                cx + (size / 2) * cos(radians).toFloat(),
-                cy + (size / 2) * sin(radians).toFloat(),
-                17f,
-                knob
-            )
+            for (value in 0..180 step 5) {
 
-            val p = Paint(3).apply {
-                color = Color.LTGRAY
-                textSize = 30f
-                textAlign = Paint.Align.CENTER
+                val degrees = 135f + value / 180f * 270f
+                val radians = Math.toRadians(degrees.toDouble())
+
+                val outer = radius + dp(12)
+                val inner = radius - dp(5)
+
+                val x1 = centerX + cos(radians).toFloat() * inner
+                val y1 = centerY + sin(radians).toFloat() * inner
+
+                val x2 = centerX + cos(radians).toFloat() * outer
+                val y2 = centerY + sin(radians).toFloat() * outer
+
+                paint.color =
+                    if (value <= angle) cyan else Color.LTGRAY
+
+                paint.strokeWidth =
+                    if (value % 15 == 0) dp(3).toFloat()
+                    else dp(1).toFloat()
+
+                canvas.drawLine(x1, y1, x2, y2, paint)
+
+                if (value % 15 == 0) {
+
+                    paint.style = Paint.Style.FILL
+                    paint.textSize = dp(11).toFloat()
+                    paint.textAlign = Paint.Align.CENTER
+
+                    val labelRadius = radius + dp(31)
+
+                    val tx = centerX +
+                        cos(radians).toFloat() * labelRadius
+
+                    val ty = centerY +
+                        sin(radians).toFloat() * labelRadius +
+                        dp(4)
+
+                    canvas.drawText(
+                        "$value°",
+                        tx,
+                        ty,
+                        paint
+                    )
+
+                    paint.style = Paint.Style.STROKE
+                }
             }
 
+            // SELECTOR
+
+            val pointerDegrees = 135f + angle / 180f * 270f
+            val pointerRadians =
+                Math.toRadians(pointerDegrees.toDouble())
+
+            val px = centerX +
+                cos(pointerRadians).toFloat() * radius
+
+            val py = centerY +
+                sin(pointerRadians).toFloat() * radius
+
+            paint.style = Paint.Style.FILL
+            paint.color = cyan
+
+            canvas.drawCircle(
+                px,
+                py,
+                dp(10).toFloat(),
+                paint
+            )
+
+            // VALOR CENTRAL
+
+            paint.color = white
+            paint.textAlign = Paint.Align.CENTER
+            paint.textSize = dp(24).toFloat()
+            paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+
             canvas.drawText(
-                "GIRA PARA AJUSTAR",
-                cx,
-                cy + size * .62f,
-                p
+                "$angle°",
+                centerX,
+                centerY + dp(8),
+                paint
+            )
+
+            paint.textSize = dp(12).toFloat()
+            paint.typeface = android.graphics.Typeface.DEFAULT
+
+            canvas.drawText(
+                "PASO 5°",
+                centerX,
+                centerY + dp(32),
+                paint
             )
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
 
-            if (
-                event.action == MotionEvent.ACTION_DOWN ||
-                event.action == MotionEvent.ACTION_MOVE ||
-                event.action == MotionEvent.ACTION_UP
-            ) {
+            when (event.action) {
 
-                val cx = width / 2f
-                val cy = height / 2f
+                MotionEvent.ACTION_DOWN,
+                MotionEvent.ACTION_MOVE -> {
 
-                var deg = Math.toDegrees(
-                    atan2(
-                        (event.y - cy).toDouble(),
-                        (event.x - cx).toDouble()
-                    )
-                )
+                    val dx = event.x - centerX
+                    val dy = event.y - centerY
 
-                deg = (deg + 360) % 360
+                    var degrees = Math.toDegrees(
+                        atan2(dy, dx).toDouble()
+                    ).toFloat()
 
-                val relative =
-                    if (deg >= 135) deg - 135
-                    else deg + 225
+                    if (degrees < 0) degrees += 360f
 
-                value = (relative / 1.5)
-                    .toInt()
-                    .coerceIn(0, 180)
+                    var normalized = degrees - 135f
 
-                invalidate()
+                    if (normalized < 0) {
+                        normalized += 360f
+                    }
 
-                if (
-                    event.action != MotionEvent.ACTION_MOVE ||
-                    event.eventTime % 70L < 20L
-                ) {
-                    onChange(value)
+                    normalized = normalized.coerceIn(0f, 270f)
+
+                    val rawAngle =
+                        (normalized / 270f * 180f).roundToInt()
+
+                    val snappedAngle =
+                        ((rawAngle + 2) / 5 * 5).coerceIn(0, 180)
+
+                    angle = snappedAngle
+
+                    onAngleChanged?.invoke(angle)
+
+                    invalidate()
+
+                    return true
                 }
 
-                return true
+                MotionEvent.ACTION_UP -> {
+                    onAngleSelected?.invoke(angle)
+                    performClick()
+                    return true
+                }
             }
 
+            return true
+        }
+
+        override fun performClick(): Boolean {
+            super.performClick()
             return true
         }
     }
